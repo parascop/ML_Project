@@ -1,0 +1,10 @@
+# Dark "security operations centre" look for the Streamlit app
+[theme]
+base = "dark"
+primaryColor = "#22d3ee"
+backgroundColor = "#070b14"
+secondaryBackgroundColor = "#0f172a"
+textColor = "#e2e8f0"
+
+[browser]
+gatherUsageStats = false

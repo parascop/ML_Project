@@ -1,0 +1,91 @@
+{
+  "accuracy": 0.9823,
+  "precision": 0.9913,
+  "recall": 0.9706,
+  "f1": 0.9808,
+  "false_positive_rate": 0.0074,
+  "confusion_matrix": [
+    [
+      13369,
+      100
+    ],
+    [
+      345,
+      11381
+    ]
+  ],
+  "per_class": {
+    "Normal": {
+      "precision": 0.9748432259005396,
+      "recall": 0.9925755438414137,
+      "f1-score": 0.9836294743037928,
+      "support": 13469.0
+    },
+    "Attack": {
+      "precision": 0.9912899573207908,
+      "recall": 0.9705782022855194,
+      "f1-score": 0.9808247511526694,
+      "support": 11726.0
+    },
+    "accuracy": 0.9823377654296488,
+    "macro avg": {
+      "precision": 0.9830665916106652,
+      "recall": 0.9815768730634665,
+      "f1-score": 0.9822271127282312,
+      "support": 25195.0
+    },
+    "weighted avg": {
+      "precision": 0.9824976959395896,
+      "recall": 0.9823377654296488,
+      "f1-score": 0.9823241286530656,
+      "support": 25195.0
+    }
+  },
+  "train_seconds": 0.74,
+  "train_rows": 20000,
+  "extra_test": {
+    "accuracy": 0.7675,
+    "precision": 0.9596,
+    "recall": 0.6176,
+    "f1": 0.7515,
+    "false_positive_rate": 0.0344,
+    "confusion_matrix": [
+      [
+        9377,
+        334
+      ],
+      [
+        4907,
+        7926
+      ]
+    ],
+    "per_class": {
+      "Normal": {
+        "precision": 0.6564687762531504,
+        "recall": 0.9656060137987849,
+        "f1-score": 0.7815794957282767,
+        "support": 9711.0
+      },
+      "Attack": {
+        "precision": 0.9595641646489104,
+        "recall": 0.6176264318553729,
+        "f1-score": 0.7515289432513156,
+        "support": 12833.0
+      },
+      "accuracy": 0.7675212916962385,
+      "macro avg": {
+        "precision": 0.8080164704510304,
+        "recall": 0.7916162228270789,
+        "f1-score": 0.7665542194897961,
+        "support": 22544.0
+      },
+      "weighted avg": {
+        "precision": 0.8290035136237496,
+        "recall": 0.7675212916962385,
+        "f1-score": 0.7644734480021924,
+        "support": 22544.0
+      }
+    },
+    "unseen_attack_detection_rate": 0.3517
+  }
+}

@@ -1,0 +1,6 @@
+model,accuracy,precision,recall,f1,false_positive_rate,train_seconds,extra_test_f1,unseen_attack_detection
+gradient_boosting,0.9993,0.9996,0.9989,0.9992,0.0004,5.94,0.773,0.3077
+random_forest,0.9988,0.9993,0.9982,0.9988,0.0006,0.89,0.7526,0.2904
+neural_network,0.9957,0.9964,0.9943,0.9953,0.0031,10.44,0.7815,0.3536
+svm,0.9823,0.9913,0.9706,0.9808,0.0074,0.74,0.7515,0.3517
+logistic_regression,0.9707,0.9772,0.9593,0.9682,0.0195,0.36,0.7326,0.3408
