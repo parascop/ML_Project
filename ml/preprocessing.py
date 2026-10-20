@@ -15,8 +15,8 @@ Feature selection (5) runs before SMOTE (7) on purpose: features are ranked on
 real training rows, and SMOTE then only has to create rows for the chosen features.
 
 Run from the project root:
-    python -m src.preprocessing --dataset cicids2017 --data data/cicids2017
-    python -m src.preprocessing --dataset nslkdd --data data/nsl-kdd/KDDTrain+.txt
+    python -m ml.preprocessing --dataset cicids2017 --data ml/data/cicids2017
+    python -m ml.preprocessing --dataset nslkdd --data ml/data/nsl-kdd/KDDTrain+.txt
 """
 
 import argparse
@@ -41,6 +41,10 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 
 RANDOM_STATE = 42
+
+# Everything the ML stages save (models, metrics, plots) goes here; backend/ and frontend/ read it.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ARTIFACTS_DIR = PROJECT_ROOT / "resources" / "artifacts"
 
 # Columns that identify a connection rather than describe its behaviour.
 # A model trained on them memorises the lab setup (IPs, times), so they are removed.
@@ -324,7 +328,7 @@ def plot_class_balance(before, after, class_names, path):
 # ---------------------------------------------------------------------------
 
 def run(dataset, data_path, task="binary", max_rows=300_000, n_features=20,
-        balance="smote", smote_ratio=0.5, test_size=0.2, artifacts_dir="artifacts"):
+        balance="smote", smote_ratio=0.5, test_size=0.2, artifacts_dir=ARTIFACTS_DIR):
     out = Path(artifacts_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -447,7 +451,7 @@ def to_float32(X):
     return np.asarray(X, dtype="float32")
 
 
-def load_processed_data(artifacts_dir="artifacts"):
+def load_processed_data(artifacts_dir=ARTIFACTS_DIR):
     """Used by the training stage: returns X_train, y_train, X_test, y_test, metadata."""
     out = Path(artifacts_dir)
     data = np.load(out / "processed_data.npz")
@@ -488,7 +492,7 @@ def main():
     parser.add_argument("--smote-ratio", type=float, default=0.5,
                         help="oversample minority classes up to this fraction of the majority class")
     parser.add_argument("--test-size", type=float, default=0.2)
-    parser.add_argument("--artifacts", default="artifacts")
+    parser.add_argument("--artifacts", default=ARTIFACTS_DIR)
     args = parser.parse_args()
 
     run(args.dataset, args.data, task=args.task, max_rows=args.max_rows,

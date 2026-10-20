@@ -6,11 +6,11 @@ train/test split saved by Phase 1, so every model sees exactly the same data.
 For each model it prints and saves the metrics, a confusion matrix and the model.
 
 Run from the project root (after Phase 1):
-    python -m src.classical_models
-    python -m src.classical_models --extra-test data/nsl-kdd/KDDTest+.txt   # NSL-KDD only
+    python -m ml.classical_models
+    python -m ml.classical_models --extra-test ml/data/nsl-kdd/KDDTest+.txt   # NSL-KDD only
 
 At the end, the chosen model (default: Gradient Boosting) is saved together with the
-Phase 1 preprocessor as ONE scikit-learn Pipeline in artifacts/nids_model.joblib.
+Phase 1 preprocessor as ONE scikit-learn Pipeline in resources/artifacts/nids_model.joblib.
 The Streamlit app loads that file, so raw input is always transformed exactly as in training.
 """
 
@@ -27,8 +27,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
 from sklearn.svm import SVC
 
-from src.evaluation import compare_models, evaluate_model, load_extra_test, save_curves
-from src.preprocessing import RANDOM_STATE, load_processed_data, to_float32
+from ml.evaluation import compare_models, evaluate_model, load_extra_test, save_curves
+from ml.preprocessing import ARTIFACTS_DIR, RANDOM_STATE, load_processed_data, to_float32
 
 
 def build_models(class_weights=None):
@@ -58,7 +58,7 @@ def subsample(X, y, max_rows):
     return X_small, y_small
 
 
-def save_deployment_model(model_name, artifacts_dir="artifacts"):
+def save_deployment_model(model_name, artifacts_dir=ARTIFACTS_DIR):
     """Combine the fitted preprocessor and a trained model into one Pipeline for the app."""
     out = Path(artifacts_dir)
     with open(out / "metadata.json") as f:
@@ -86,7 +86,7 @@ def save_deployment_model(model_name, artifacts_dir="artifacts"):
     print(f"\nSaved {model_name} + preprocessor as one pipeline: {out / 'nids_model.joblib'}")
 
 
-def train_all(artifacts_dir="artifacts", only=None, svm_max_rows=20_000, extra_test=None,
+def train_all(artifacts_dir=ARTIFACTS_DIR, only=None, svm_max_rows=20_000, extra_test=None,
               deploy_model="gradient_boosting"):
     out = Path(artifacts_dir)
     (out / "models").mkdir(parents=True, exist_ok=True)
@@ -119,7 +119,7 @@ def train_all(artifacts_dir="artifacts", only=None, svm_max_rows=20_000, extra_t
 
 def main():
     parser = argparse.ArgumentParser(description="Stage 2: train classical ML models")
-    parser.add_argument("--artifacts", default="artifacts")
+    parser.add_argument("--artifacts", default=ARTIFACTS_DIR)
     parser.add_argument("--models", nargs="+",
                         choices=["random_forest", "logistic_regression", "svm", "gradient_boosting"],
                         help="train only these models (default: all)")
@@ -129,7 +129,7 @@ def main():
     parser.add_argument("--deploy-model", default="gradient_boosting",
                         help="model saved with the preprocessor for the app ('' to skip)")
     parser.add_argument("--deploy-only", action="store_true",
-                        help="skip training; only rebuild artifacts/nids_model.joblib")
+                        help="skip training; only rebuild resources/artifacts/nids_model.joblib")
     args = parser.parse_args()
     if args.deploy_only:
         save_deployment_model(args.deploy_model, args.artifacts)

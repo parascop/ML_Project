@@ -3,13 +3,13 @@ Evaluation helpers shared by every model (classical and deep learning).
 
   compute_metrics()   accuracy, precision, recall, F1, confusion matrix, per-class report
   print_metrics()     readable console summary
-  save_results()      one JSON file per model in artifacts/results/
+  save_results()      one JSON file per model in resources/artifacts/results/
   evaluate_model()    all of the above for one trained model (test set + optional extra test set)
   compare_models()    comparison table + chart of every saved model
   save_curves()       ROC / precision-recall curves and score histograms for the app's graphs
 
 Compare all models trained so far:
-    python -m src.evaluation
+    python -m ml.evaluation
 """
 
 import argparse
@@ -28,7 +28,7 @@ from sklearn.metrics import (accuracy_score, average_precision_score, classifica
                              confusion_matrix, f1_score, precision_recall_curve, precision_score,
                              recall_score, roc_auc_score, roc_curve)
 
-from src.preprocessing import load_extra_test_set, load_processed_data
+from ml.preprocessing import ARTIFACTS_DIR, load_extra_test_set, load_processed_data
 
 
 def compute_metrics(y_true, y_pred, class_names):
@@ -80,14 +80,14 @@ def plot_confusion_matrix(cm, class_names, title, path):
     plt.close()
 
 
-def save_results(name, metrics, artifacts_dir="artifacts"):
+def save_results(name, metrics, artifacts_dir=ARTIFACTS_DIR):
     out = Path(artifacts_dir) / "results"
     out.mkdir(parents=True, exist_ok=True)
     with open(out / f"{name}.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
 
-def load_extra_test(path, metadata, artifacts_dir="artifacts"):
+def load_extra_test(path, metadata, artifacts_dir=ARTIFACTS_DIR):
     """Load a separate test file and transform it with the saved Phase 1 preprocessor."""
     preprocessor = joblib.load(Path(artifacts_dir) / "preprocessor.joblib")
     X_raw, y, raw_labels = load_extra_test_set(path, metadata)
@@ -104,7 +104,7 @@ def unseen_attack_detection_rate(y_pred, raw_labels, training_raw_labels, normal
     return round(float(np.mean(y_pred[unseen] != normal_index)), 4)
 
 
-def evaluate_model(name, predict, X_test, y_test, metadata, artifacts_dir="artifacts",
+def evaluate_model(name, predict, X_test, y_test, metadata, artifacts_dir=ARTIFACTS_DIR,
                    extra=None, train_info=None):
     """
     Evaluate one trained model the same way for every model type.
@@ -138,7 +138,7 @@ def evaluate_model(name, predict, X_test, y_test, metadata, artifacts_dir="artif
     return metrics
 
 
-def compare_models(artifacts_dir="artifacts"):
+def compare_models(artifacts_dir=ARTIFACTS_DIR):
     """Build a table of all saved model results and pick the best by test F1."""
     results_dir = Path(artifacts_dir) / "results"
     rows = []
@@ -186,12 +186,12 @@ def _thin(*arrays, max_points=250):
     return [np.round(a[idx], 5).tolist() for a in arrays]
 
 
-def save_curves(artifacts_dir="artifacts"):
+def save_curves(artifacts_dir=ARTIFACTS_DIR):
     """
     Binary task only. For every saved model, compute on the held-out test set:
       ROC curve + AUC, precision-recall curve + average precision, and (for models
       that output probabilities) a histogram of attack probabilities per true class.
-    Saved to artifacts/curves.json, which the Streamlit app reads.
+    Saved to resources/artifacts/curves.json, which the Streamlit app reads.
     """
     out = Path(artifacts_dir)
     _, _, X_test, y_test, meta = load_processed_data(artifacts_dir)
@@ -209,7 +209,7 @@ def save_curves(artifacts_dir="artifacts"):
         elif path.suffix == ".pt":
             import torch
 
-            from src.deep_learning import load_network
+            from ml.deep_learning import load_network
             with torch.no_grad():
                 logits = load_network(path)(torch.from_numpy(X_test))
             scores, is_probability = torch.softmax(logits, dim=1)[:, 1].numpy(), True
@@ -239,7 +239,7 @@ def save_curves(artifacts_dir="artifacts"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compare all trained models")
-    parser.add_argument("--artifacts", default="artifacts")
+    parser.add_argument("--artifacts", default=ARTIFACTS_DIR)
     parser.add_argument("--curves", action="store_true", help="also save ROC / PR curves for the app")
     args = parser.parse_args()
     compare_models(args.artifacts)

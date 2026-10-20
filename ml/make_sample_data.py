@@ -6,7 +6,7 @@ downloaded. The rows are random numbers, so any score obtained on them is
 meaningless and must not be reported as a result.
 
 Run from the project root:
-    python scripts/make_sample_data.py
+    python ml/make_sample_data.py
 """
 
 from pathlib import Path
@@ -89,7 +89,7 @@ def make_nslkdd(n=4000):
 
 
 if __name__ == "__main__":
-    out = Path("data/sample")
+    out = Path(__file__).resolve().parent / "data" / "sample"
     out.mkdir(parents=True, exist_ok=True)
     make_cicids().to_csv(out / "cicids2017_sample.csv", index=False)
     make_nslkdd().to_csv(out / "nslkdd_sample.txt", index=False, header=False)

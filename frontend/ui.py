@@ -1,5 +1,5 @@
 """
-Look-and-feel helpers for the Streamlit app (app.py).
+Frontend look-and-feel helpers for the Streamlit app (frontend/app.py).
 
 Nothing in here affects predictions; it only draws things:
   inject_css()      global dark "security operations centre" styling

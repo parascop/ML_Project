@@ -1,8 +1,9 @@
 """
-Stage 4 - Streamlit interface for the NIDS mini project.
+Frontend - Streamlit dashboard for the NIDS mini project (Stage 4).
 
-Loads artifacts/nids_model.joblib (preprocessor + model in one Pipeline, saved by
-src/classical_models.py) and predicts Normal / Attack for network-flow features.
+All predictions come from backend/predictor.py, which loads
+resources/artifacts/nids_model.joblib (preprocessor + model in one Pipeline, saved by
+ml/classical_models.py). This file only builds the page.
 
 Tabs:
   Analyse        pick a held-out test connection, run an animated scan, compare with the truth
@@ -12,28 +13,28 @@ Tabs:
   Model insights model comparison, ROC / precision-recall curves, score distributions,
                  feature importance, confusion matrix, training curves, dataset balance
 
-Visual helpers (CSS, animated dial, event feed) live in src/ui.py.
+Visual helpers (CSS, animated dial, event feed) live in frontend/ui.py.
 
 Run from the project root:
-    streamlit run app.py
+    streamlit run frontend/app.py
 """
 
-import json
 import random
+import sys
 import time
 from pathlib import Path
 
-import altair as alt
-import joblib
-import numpy as np
-import pandas as pd
-import streamlit as st
+# make the project root importable (backend/, ml/) when Streamlit runs this file directly
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src import ui
+import altair as alt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import streamlit as st  # noqa: E402
 
-ARTIFACTS = Path(__file__).parent / "artifacts"
-MODEL_PATH = ARTIFACTS / "nids_model.joblib"
-SAMPLES_PATH = ARTIFACTS / "test_samples.csv"
+from backend import predictor  # noqa: E402
+from frontend import ui  # noqa: E402
+
 DATASET_NAMES = {"nslkdd": "NSL-KDD", "cicids2017": "CICIDS2017"}
 
 st.set_page_config(page_title="ML Network Intrusion Detection", page_icon="🛡️", layout="wide")
@@ -41,47 +42,22 @@ ui.inject_css()
 
 
 # ---------------------------------------------------------------------------
-# Loading and prediction
+# Cached access to the backend (load files once, not on every rerun)
 # ---------------------------------------------------------------------------
 
 @st.cache_resource
 def load_bundle():
-    return joblib.load(MODEL_PATH)
+    return predictor.load_bundle()
 
 
 @st.cache_data
-def load_csv(path):
-    return pd.read_csv(path) if Path(path).exists() else None
+def load_csv(name):
+    return predictor.load_csv(name)
 
 
 @st.cache_data
-def load_json(path):
-    if not Path(path).exists():
-        return None
-    with open(path) as f:
-        return json.load(f)
-
-
-def training_defaults(bundle):
-    """Training median (numeric) / most frequent value (categorical), used to pre-fill inputs."""
-    preprocessor = bundle["pipeline"].named_steps["preprocess"]
-    defaults = {}
-    for name, transformer, columns in preprocessor.transformers_:
-        if name in ("num", "cat"):
-            defaults.update(zip(columns, transformer.named_steps["impute"].statistics_))
-    return defaults
-
-
-def predict(bundle, rows):
-    """Return a DataFrame with the predicted class and the probability that each row is an attack."""
-    pipeline = bundle["pipeline"]
-    proba = pipeline.predict_proba(rows[bundle["selected_features"]])
-    names = [bundle["class_names"][c] for c in pipeline.classes_]
-    normal_col = names.index("Normal")
-    return pd.DataFrame({
-        "prediction": [names[i] for i in proba.argmax(axis=1)],
-        "attack_probability": 1 - proba[:, normal_col],
-    }, index=rows.index)
+def load_json(name):
+    return predictor.load_json(name)
 
 
 def dial_text(bundle, prediction):
@@ -99,17 +75,6 @@ def pretty(name):
     return name.replace("_", " ").title()
 
 
-def standardised_values(bundle, row):
-    """
-    How far each numeric feature of `row` is from the training average, in standard
-    deviations (z-score), using the mean/std stored in the fitted scaler.
-    """
-    numeric_step = bundle["pipeline"].named_steps["preprocess"].named_transformers_["num"]
-    columns = [f for f in bundle["selected_features"] if f not in bundle["categorical_features"]]
-    z = numeric_step.transform(row[columns])[0]
-    return pd.DataFrame({"feature": columns, "value": row[columns].iloc[0].to_numpy(), "z": z})
-
-
 def zscore_chart(df):
     df = df.assign(shown=df["z"].clip(-6, 6), size=df["z"].abs()).sort_values("size", ascending=False)
     return alt.Chart(df).mark_bar(cornerRadius=3).encode(
@@ -125,11 +90,11 @@ def zscore_chart(df):
 # Page setup
 # ---------------------------------------------------------------------------
 
-if not MODEL_PATH.exists():
+if not predictor.model_available():
     ui.hero("Network Intrusion Detection", "No trained model found yet.", ["Model offline"])
     st.error("Run these first, from the project folder:")
-    st.code("python -m src.preprocessing --dataset nslkdd --data data/nsl-kdd/KDDTrain+.txt\n"
-            "python -m src.classical_models", language="bash")
+    st.code("python -m ml.preprocessing --dataset nslkdd --data ml/data/nsl-kdd/KDDTrain+.txt\n"
+            "python -m ml.classical_models", language="bash")
     st.stop()
 
 bundle = load_bundle()
@@ -137,8 +102,8 @@ features = bundle["selected_features"]
 categorical = set(bundle["categorical_features"])
 binary = len(bundle["class_names"]) == 2
 metrics = bundle["test_metrics"]
-samples = load_csv(SAMPLES_PATH)
-defaults = training_defaults(bundle)
+samples = load_csv("test_samples.csv")
+defaults = predictor.training_defaults(bundle)
 
 ui.hero(
     "Network Intrusion Detection System",
@@ -179,7 +144,7 @@ def pick_random_example():
 
 with tab_analyse:
     if samples is None:
-        st.warning("artifacts/test_samples.csv not found. Run Phase 1 to create it.")
+        st.warning("resources/artifacts/test_samples.csv not found. Run Phase 1 to create it.")
     else:
         left, right = st.columns([1.15, 1], gap="large")
         with left:
@@ -202,7 +167,7 @@ with tab_analyse:
             st.caption("The true label stays hidden until the model has made its prediction.")
 
         if analyse:  # store the result so later reruns redraw the same panel without re-animating
-            result = predict(bundle, row).iloc[0]
+            result = predictor.predict(bundle, row).iloc[0]
             st.session_state["scan"] = {"idx": int(index), "value": float(result["attack_probability"]),
                                         "prediction": result["prediction"]}
 
@@ -223,7 +188,7 @@ with tab_analyse:
 
         if scan and scan["idx"] == index:
             ui.section("How unusual is this connection?")
-            st.altair_chart(zscore_chart(standardised_values(bundle, row)), width="stretch")
+            st.altair_chart(zscore_chart(predictor.standardised_values(bundle, row)), width="stretch")
             st.markdown('<div class="note">Each bar shows how far a feature value is from the average '
                         'of the training data (orange = more than 2 standard deviations). It describes the '
                         'connection; it is not a measure of how much the model relied on that feature.</div>',
@@ -293,7 +258,7 @@ with tab_sim:
                 values[f] = cols[i % 3].number_input(f, min_value=0.0, key=f"f_{f}", format="%g")
 
     with dial_col:
-        result = predict(bundle, pd.DataFrame([values])).iloc[0]
+        result = predictor.predict(bundle, pd.DataFrame([values])).iloc[0]
         value = float(result["attack_probability"])
         is_attack, verdict, detail = dial_text(bundle, result["prediction"])
         ui.section("Live threat dial")
@@ -315,7 +280,7 @@ with tab_sim:
     grid = np.linspace(0.0, high, 60)
     curve_rows = pd.DataFrame([values] * len(grid))
     curve_rows[sweep] = grid
-    curve = pd.DataFrame({sweep: grid, "probability": predict(bundle, curve_rows)["attack_probability"].to_numpy()})
+    curve = pd.DataFrame({sweep: grid, "probability": predictor.predict(bundle, curve_rows)["attack_probability"].to_numpy()})
     line = alt.Chart(curve).mark_area(
         line={"color": ui.CYAN}, interpolate="step-after",
         color=alt.Gradient(gradient="linear", x1=1, x2=1, y1=1, y2=0,
@@ -361,7 +326,7 @@ def timeline_chart(history):
 
 with tab_live:
     if samples is None:
-        st.warning("artifacts/test_samples.csv not found. Run Phase 1 to create it.")
+        st.warning("resources/artifacts/test_samples.csv not found. Run Phase 1 to create it.")
     else:
         st.markdown('<div class="note">Replay mode: connections from the held-out test set are fed '
                     'to the model one at a time, like a monitoring console. This is a replay of '
@@ -391,7 +356,7 @@ with tab_live:
 
         if start:
             stream = samples.sample(count).reset_index(drop=True)  # new random order every run
-            results = predict(bundle, stream)  # predict all at once, then reveal one by one
+            results = predictor.predict(bundle, stream)  # predict all at once, then reveal one by one
             delay = {"Slow": 0.8, "Normal": 0.4, "Fast": 0.12}[speed]
             history = []
             for i in range(count):
@@ -432,14 +397,14 @@ with tab_batch:
         data = pd.read_csv(uploaded)
     elif st.session_state.get("use_demo_file") and samples is not None:
         data = samples.copy()
-        st.caption("Using artifacts/test_samples.csv")
+        st.caption("Using resources/artifacts/test_samples.csv")
 
     if data is not None:
         missing = [f for f in features if f not in data.columns]
         if missing:
             st.error(f"Missing columns: {missing}")
         else:
-            results = predict(bundle, data)
+            results = predictor.predict(bundle, data)
             attacks = int((results["prediction"] != "Normal").sum())
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Connections", len(results))
@@ -476,9 +441,9 @@ with tab_batch:
 # ---------------------------------------------------------------------------
 
 with tab_insights:
-    comparison = load_csv(ARTIFACTS / "model_comparison.csv")
-    curves = load_json(ARTIFACTS / "curves.json")
-    metadata = load_json(ARTIFACTS / "metadata.json")
+    comparison = load_csv("model_comparison.csv")
+    curves = load_json("curves.json")
+    metadata = load_json("metadata.json")
     if comparison is not None:
         comparison = comparison.assign(model=comparison["model"].map(pretty))
     sub_perf, sub_curves, sub_features, sub_training, sub_data = st.tabs(
@@ -516,7 +481,7 @@ with tab_insights:
                             'type was not in the training data. A supervised model cannot be relied on to '
                             'catch zero-day attacks.</div>', unsafe_allow_html=True)
 
-        results_json = load_json(ARTIFACTS / "results" / f"{bundle['model_name']}.json")
+        results_json = load_json(f"results/{bundle['model_name']}.json")
         if results_json is not None:
             ui.section(f"Confusion matrix · {pretty(bundle['model_name'])}")
             names = bundle["class_names"]
@@ -540,7 +505,7 @@ with tab_insights:
     # --- ROC, precision-recall, score distribution ------------------------------
     with sub_curves:
         if not curves:
-            st.info("No curves found. Run `python -m src.evaluation --curves` (binary task only).")
+            st.info("No curves found. Run `python -m ml.evaluation --curves` (binary task only).")
         else:
             names_available = list(curves)
             chosen = st.multiselect("Models", names_available, default=names_available, format_func=pretty)
@@ -608,7 +573,7 @@ with tab_insights:
 
     # --- feature importance ------------------------------------------------------
     with sub_features:
-        importance = load_csv(ARTIFACTS / "feature_importance.csv")
+        importance = load_csv("feature_importance.csv")
         if importance is not None:
             ui.section("Random Forest feature importance (Phase 1 feature selection)")
             n_show = st.slider("Features to show", 10, len(importance), min(len(features) + 5, len(importance)))
@@ -638,7 +603,7 @@ with tab_insights:
 
     # --- training curves -----------------------------------------------------------
     with sub_training:
-        nn_results = load_json(ARTIFACTS / "results" / "neural_network.json")
+        nn_results = load_json("results/neural_network.json")
         if nn_results and "history" in nn_results:
             ui.section("Neural network training (PyTorch)")
             hist = nn_results["history"]

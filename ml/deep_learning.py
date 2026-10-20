@@ -10,8 +10,8 @@ Loss:     cross-entropy (with class weights if Phase 1 chose class weights)
 Optimiser: Adam
 
 Run from the project root (after Phase 1):
-    python -m src.deep_learning
-    python -m src.deep_learning --extra-test data/nsl-kdd/KDDTest+.txt   # NSL-KDD only
+    python -m ml.deep_learning
+    python -m ml.deep_learning --extra-test ml/data/nsl-kdd/KDDTest+.txt   # NSL-KDD only
 """
 
 import argparse
@@ -28,8 +28,8 @@ from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.evaluation import compare_models, evaluate_model, load_extra_test, save_curves
-from src.preprocessing import RANDOM_STATE, load_processed_data
+from ml.evaluation import compare_models, evaluate_model, load_extra_test, save_curves
+from ml.preprocessing import ARTIFACTS_DIR, RANDOM_STATE, load_processed_data
 
 
 class FeedForwardNet(nn.Module):
@@ -143,7 +143,7 @@ def load_network(path):
     return model
 
 
-def run(artifacts_dir="artifacts", epochs=100, batch_size=256, lr=1e-3, extra_test=None):
+def run(artifacts_dir=ARTIFACTS_DIR, epochs=100, batch_size=256, lr=1e-3, extra_test=None):
     out = Path(artifacts_dir)
     (out / "models").mkdir(parents=True, exist_ok=True)
     (out / "plots").mkdir(parents=True, exist_ok=True)
@@ -174,7 +174,7 @@ def run(artifacts_dir="artifacts", epochs=100, batch_size=256, lr=1e-3, extra_te
 
 def main():
     parser = argparse.ArgumentParser(description="Stage 3: PyTorch feed-forward network")
-    parser.add_argument("--artifacts", default="artifacts")
+    parser.add_argument("--artifacts", default=ARTIFACTS_DIR)
     parser.add_argument("--epochs", type=int, default=100, help="maximum epochs (early stopping may end sooner)")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-3)
