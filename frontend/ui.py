@@ -93,6 +93,9 @@ header[data-testid="stHeader"] { background: transparent; }
 }
 [data-testid="stMetric"]:hover { transform: translateY(-2px); border-color: rgba(34,211,238,0.5); }
 [data-testid="stMetricLabel"] { color: #94a3b8; }
+[data-testid="stMetric"] { padding: 10px 12px; }
+.block-container [data-testid="stMetricValue"] p { font-size: clamp(1.1rem, 2.2vw, 1.9rem) !important; }
+.block-container [data-testid="stMetricLabel"] p { font-size: 0.8rem; }
 [data-testid="stSidebar"] [data-testid="stMetric"] { padding: 10px 12px; }
 [data-testid="stSidebar"] [data-testid="stMetricValue"] p { font-size: 1.2rem !important; }
 

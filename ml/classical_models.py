@@ -9,7 +9,7 @@ Run from the project root (after Phase 1):
     python -m ml.classical_models
     python -m ml.classical_models --extra-test ml/data/nsl-kdd/KDDTest+.txt   # NSL-KDD only
 
-At the end, the chosen model (default: Gradient Boosting) is saved together with the
+At the end, the deployed model (default: Logistic Regression) is saved together with the
 Phase 1 preprocessor as ONE scikit-learn Pipeline in resources/artifacts/nids_model.joblib.
 The Streamlit app loads that file, so raw input is always transformed exactly as in training.
 """
@@ -87,7 +87,7 @@ def save_deployment_model(model_name, artifacts_dir=ARTIFACTS_DIR):
 
 
 def train_all(artifacts_dir=ARTIFACTS_DIR, only=None, svm_max_rows=20_000, extra_test=None,
-              deploy_model="gradient_boosting"):
+              deploy_model="logistic_regression"):
     out = Path(artifacts_dir)
     (out / "models").mkdir(parents=True, exist_ok=True)
 
@@ -126,7 +126,7 @@ def main():
     parser.add_argument("--svm-max-rows", type=int, default=20_000,
                         help="training rows for the SVM (0 = all; slow on large data)")
     parser.add_argument("--extra-test", help="optional second test file, e.g. KDDTest+.txt")
-    parser.add_argument("--deploy-model", default="gradient_boosting",
+    parser.add_argument("--deploy-model", default="logistic_regression",
                         help="model saved with the preprocessor for the app ('' to skip)")
     parser.add_argument("--deploy-only", action="store_true",
                         help="skip training; only rebuild resources/artifacts/nids_model.joblib")

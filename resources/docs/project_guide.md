@@ -201,11 +201,11 @@ JSON (including the loss/accuracy history per epoch) and confusion matrices as t
 
 ### Saving the model with its preprocessing
 
-At the end of `python -m ml.classical_models`, the chosen model is joined with the fitted Phase 1
-preprocessor into **one** Scikit-learn `Pipeline` and saved as `resources/artifacts/nids_model.joblib`:
+A trained model is joined with the fitted Phase 1 preprocessor into **one** Scikit-learn `Pipeline` and
+saved as `resources/artifacts/nids_model.joblib`. The dashboard deploys **logistic regression**:
 
 ```
-raw selected features -> preprocessor (impute, scale, one-hot) -> cast to float32 -> Gradient Boosting
+raw selected features -> preprocessor (impute, scale, one-hot) -> cast to float32 -> Logistic Regression
 ```
 
 The frontend never touches the model directly: it calls `backend/predictor.py`, which loads this
@@ -215,8 +215,9 @@ the evaluated model on the preprocessed test set.) The file also stores the sele
 the categories for the drop-downs, the class names and the test metrics shown in the sidebar.
 
 ```bash
-python -m ml.classical_models --deploy-only                          # rebuild it without retraining
-python -m ml.classical_models --deploy-only --deploy-model random_forest   # deploy another model
+python -m ml.classical_models --deploy-only      # build the deployed pipeline (logistic regression) without retraining
+python -m ml.classical_models                     # or retrain everything; the pipeline is rebuilt at the end
+python -m ml.classical_models --deploy-model random_forest   # deploy a different model instead (the dashboard shows whichever is deployed)
 ```
 
 ### Running the app
@@ -226,7 +227,7 @@ streamlit run frontend/app.py
 ```
 
 It opens at <http://localhost:8501> with a dark "security console" theme (`.streamlit/config.toml`).
-The sidebar shows the deployed model, its test scores and the zero-day limitation. Five tabs:
+The sidebar shows the deployed model (logistic regression), its test scores and the zero-day limitation. Five tabs:
 
 | Tab | What you can do |
 |---|---|
@@ -234,20 +235,44 @@ The sidebar shows the deployed model, its test scores and the zero-day limitatio
 | 🎛️ **Simulator** | Sliders, drop-downs and number fields for all 20 features, with presets (training median, typical normal, typical attack). The live dial moves up or down from its last value whenever you change something. A **what-if curve** sweeps one feature and plots how the attack probability changes. |
 | 📡 **Live replay** | Streams randomly ordered test connections to the model one by one: live counters, a probability timeline and an event feed. This replays recorded features; it is not packet capture. |
 | 📂 **Batch upload** | Upload a CSV (or press *Use demo file*): counts, a prediction donut chart, a histogram of attack probabilities, a table with probability bars, and a CSV download of the predictions. |
-| 📊 **Model insights** | Graphs of the ML results, in sub-tabs: model comparison and KDDTest+ results, confusion matrix · ROC and precision-recall curves for all models (zoom/pan, AUC table) and score distributions · feature importance with cumulative importance · neural-network loss and accuracy per epoch, training times · dataset class balance. |
+| 📊 **Model insights** | Graphs of the deployed logistic regression, in sub-tabs: scores on the random split and on KDDTest+ (tiles, side-by-side bar chart, two confusion matrices) · ROC and precision-recall curves with the 50% threshold marked, and the score distribution · feature ranking with cumulative importance · dataset class balance. |
 
 All graphs are drawn with Altair (installed with Streamlit) from files in `resources/artifacts/`; the dial is
 HTML/SVG/JavaScript in `frontend/ui.py`. Nothing in the interface changes the predictions.
 
-Demo idea: in the *Simulator*, press *Typical normal* (the dial drops to about 0%), then *Typical
-attack* (it swings up to about 100%). Then pick `serror_rate` in the what-if curve to show where the
-model's decision changes.
+Demo idea: in the *Simulator*, press *Typical normal* (the dial drops to about 2%), then *Typical
+attack* (it swings up to about 100%). Then pick `serror_rate` in the what-if curve: with logistic
+regression it is a smooth S-shape, because the model turns a weighted sum into a probability.
 
 ## Results (NSL-KDD, binary)
 
 Phase 1 settings: `KDDTrain+.txt`, stratified 80/20 split (100,778 train / 25,195 test rows), top 20
 features (17 numeric + `protocol_type`, `service`, `flag`), class weights (SMOTE skipped because
 categorical features were selected). Produced by the commands above on this machine:
+
+### Deployed model: Logistic Regression
+
+| Test set | Accuracy | Precision | Recall | F1 | False-positive rate | Unseen attack types detected |
+|---|---|---|---|---|---|---|
+| Held-out 20% of KDDTrain+ (25,195 rows) | 0.9707 | 0.9772 | 0.9593 | 0.9682 | 0.0195 | n/a |
+| KDDTest+ (22,544 rows, separate file) | 0.7459 | 0.9133 | 0.6116 | 0.7326 | 0.0767 | 34.1% |
+
+ROC AUC on the held-out split: 0.9944. Training took 0.3 seconds.
+
+* On a random split of the same file the scores are high because the test rows come from the same
+  distribution and the same attack types as the training rows.
+* KDDTest+ includes 3,750 attacks (of 12,833) from 17 attack types that never occur in KDDTrain+ (for
+  example `mscan`, `apache2`, `processtable`, `snmpguess`, `saint`). On that file accuracy falls to about
+  75%, precision stays high but recall falls to 0.61, so many attacks are labelled normal, and only about a
+  third of the unseen attack types are detected. This is the zero-day limitation measured, not just stated.
+* Logistic regression draws a single flat boundary through the encoded features, so it cannot learn rules
+  that depend on combinations of features. That is why it raises more false alarms than the tree models
+  below (1.95% vs 0.04% for Gradient Boosting on the held-out split).
+
+### Comparison with the other models (development only)
+
+`ml/` also trains four other models on the same split. They are **not part of the dashboard**, which
+shows only logistic regression; their results are kept here for reference.
 
 **Held-out 20% of KDDTrain+**
 
@@ -257,9 +282,9 @@ categorical features were selected). Produced by the commands above on this mach
 | Random Forest | 0.9988 | 0.9993 | 0.9982 | 0.9988 | 0.0006 | 0.9 s |
 | Neural network (PyTorch) | 0.9957 | 0.9964 | 0.9943 | 0.9953 | 0.0031 | 9.7 s (42 epochs) |
 | SVM (20k-row subsample) | 0.9823 | 0.9913 | 0.9706 | 0.9808 | 0.0074 | 0.7 s |
-| Logistic Regression | 0.9707 | 0.9772 | 0.9593 | 0.9682 | 0.0195 | 0.3 s |
+| **Logistic Regression (deployed)** | 0.9707 | 0.9772 | 0.9593 | 0.9682 | 0.0195 | 0.3 s |
 
-**KDDTest+ (separate test file, includes attack types absent from training)**
+**KDDTest+**
 
 | Model | Accuracy | Precision | Recall | F1 | False-positive rate | Unseen attack types detected |
 |---|---|---|---|---|---|---|
@@ -267,33 +292,12 @@ categorical features were selected). Produced by the commands above on this mach
 | Gradient Boosting | 0.7850 | 0.9689 | 0.6430 | 0.7730 | 0.0273 | 30.8% |
 | Random Forest | 0.7696 | 0.9678 | 0.6157 | 0.7526 | 0.0271 | 29.0% |
 | SVM | 0.7675 | 0.9596 | 0.6176 | 0.7515 | 0.0344 | 35.2% |
-| Logistic Regression | 0.7459 | 0.9133 | 0.6116 | 0.7326 | 0.0767 | 34.1% |
+| **Logistic Regression (deployed)** | 0.7459 | 0.9133 | 0.6116 | 0.7326 | 0.0767 | 34.1% |
 
-**Best model on the held-out split: Gradient Boosting** (F1 0.9992, fewest false alarms), with Random
-Forest very close behind. The neural network comes third, ahead of the SVM and Logistic Regression.
-
-On KDDTest+ the order changes: the **neural network** has the highest F1 (0.7815) and recall, while
-Gradient Boosting has the higher precision and fewer false alarms (2.7% vs 4.5%). No model is best on
-every metric, so the choice depends on what matters more: catching more attacks or raising fewer false
-alarms. For the demo app, Gradient Boosting is the default: it wins on the main test set, has the lowest
-false-positive rate there (and about 2.7% on KDDTest+, level with Random Forest), and is easy to save
-together with its preprocessing.
-
-What the two tables show:
-
-* On a random split of the same file the task is nearly solved (F1 ≈ 0.999). The test rows come from
-  the same distribution and the same attack types as the training rows.
-* On KDDTest+ every model drops to F1 ≈ 0.73-0.78. Precision stays high but recall falls to about
-  0.61-0.66, so many attacks are labelled normal.
-* 3,750 of the 12,833 attacks in KDDTest+ (29%) belong to 17 attack types that never occur in
-  KDDTrain+ (e.g. `mscan`, `apache2`, `processtable`, `snmpguess`, `saint`). Every model, including
-  the neural network, detects only about 29-35% of them. This is the zero-day limitation measured,
-  not just stated.
-* Model selection uses the same test set that is reported, so the "best model" score is slightly
-  optimistic. The differences between the top three models are small (under 0.5 percentage points of F1).
-* The deep-learning model does not beat the tree models on the held-out split (a common result on
-  tabular data like this). On KDDTest+ it is slightly ahead on F1, but the margin (0.8 points over
-  Gradient Boosting) is small for a single run.
+Logistic regression is the simplest and fastest of the five and has the lowest scores on both test sets.
+On the held-out split Gradient Boosting is best (F1 0.9992); on KDDTest+ the neural network is slightly
+ahead on F1, but the margin is small for a single run. Model selection uses the same test set that is
+reported, so any "best model" score is slightly optimistic.
 
 These numbers come from one run with `random_state=42`. Results will be different on CICIDS2017.
 

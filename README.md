@@ -1,8 +1,8 @@
 # ML-Based Network Intrusion Detection System
 
-College mini project. Machine-learning models classify network connections as **Normal** or
-**Attack**. Four Scikit-learn models are compared with a PyTorch neural network, and an interactive
-Streamlit dashboard makes predictions and shows the results as graphs.
+College mini project. A **logistic regression** model classifies network connections as **Normal** or
+**Attack**, and an interactive Streamlit dashboard makes predictions and shows the results as graphs.
+(The `ml/` code also trains four other models for comparison; they are not part of the dashboard.)
 
 The full write-up (dataset, every pipeline step, results, limitations) is in
 **[resources/docs/project_guide.md](resources/docs/project_guide.md)**.
@@ -46,17 +46,18 @@ python -m ml.classical_models --extra-test ml/data/nsl-kdd/KDDTest+.txt
 python -m ml.deep_learning --extra-test ml/data/nsl-kdd/KDDTest+.txt
 ```
 
-## Results (NSL-KDD, held-out 20% test set)
+## Results (NSL-KDD, logistic regression)
 
-| Model | Accuracy | F1 | False-positive rate |
-|---|---|---|---|
-| Gradient Boosting (deployed) | 0.9993 | 0.9992 | 0.04% |
-| Random Forest | 0.9988 | 0.9988 | 0.06% |
-| Neural network (PyTorch) | 0.9957 | 0.9953 | 0.31% |
-| SVM | 0.9823 | 0.9808 | 0.74% |
-| Logistic Regression | 0.9707 | 0.9682 | 1.95% |
+The dashboard deploys a **logistic regression** model.
 
-On the separate KDDTest+ file, which contains 17 attack types never seen in training, F1 drops to
-0.73–0.78. Only about a third of the attacks of those unseen types are detected. A supervised model
-cannot be relied on to catch zero-day attacks. Details and other limitations are in the
+| Test set | Accuracy | Precision | Recall | F1 | False alarms |
+|---|---|---|---|---|---|
+| Held-out 20% of KDDTrain+ | 97.07% | 97.72% | 95.93% | 0.9682 | 1.95% |
+| KDDTest+ (separate file, includes unseen attack types) | 74.59% | 91.33% | 61.16% | 0.7326 | 7.67% |
+
+KDDTest+ contains 17 attack types that never appear in training, and only about a third (34.1%) of
+those attacks are detected. A supervised model cannot be relied on to catch zero-day attacks.
+
+The `ml/` code also trains Random Forest, SVM, Gradient Boosting and a PyTorch network for comparison.
+They are not part of the dashboard; their results, and the other limitations, are in the
 [project guide](resources/docs/project_guide.md).

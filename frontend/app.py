@@ -10,8 +10,9 @@ Tabs:
   Simulator      change feature values with sliders and watch the speed dial react live
   Live replay    stream test connections one by one, like a monitoring console
   Batch upload   predict a whole CSV file
-  Model insights model comparison, ROC / precision-recall curves, score distributions,
-                 feature importance, confusion matrix, training curves, dataset balance
+  Model insights results of the deployed logistic regression: scores on two test sets,
+                 confusion matrices, ROC / precision-recall curves, score distribution,
+                 feature ranking, dataset balance
 
 Visual helpers (CSS, animated dial, event feed) live in frontend/ui.py.
 
@@ -282,7 +283,7 @@ with tab_sim:
     curve_rows[sweep] = grid
     curve = pd.DataFrame({sweep: grid, "probability": predictor.predict(bundle, curve_rows)["attack_probability"].to_numpy()})
     line = alt.Chart(curve).mark_area(
-        line={"color": ui.CYAN}, interpolate="step-after",
+        line={"color": ui.CYAN}, interpolate="monotone",
         color=alt.Gradient(gradient="linear", x1=1, x2=1, y1=1, y2=0,
                            stops=[alt.GradientStop(color="rgba(34,211,238,0.02)", offset=0),
                                   alt.GradientStop(color="rgba(34,211,238,0.35)", offset=1)])).encode(
@@ -300,7 +301,7 @@ with tab_sim:
     c1.markdown('<div class="note">The curve shows the model\'s attack probability as the chosen '
                 'feature changes, with every other control kept at its current value. The dashed '
                 'white line is the current value; the red line is the 50% decision threshold. '
-                'Steps appear because tree models split features at fixed thresholds.</div>',
+                'The curve is smooth because logistic regression turns a weighted sum into a probability.</div>',
                 unsafe_allow_html=True)
 
 
@@ -441,123 +442,131 @@ with tab_batch:
 # ---------------------------------------------------------------------------
 
 with tab_insights:
-    comparison = load_csv("model_comparison.csv")
+    model_name = bundle["model_name"]
+    model_label = pretty(model_name)
+    result = load_json(f"results/{model_name}.json")
     curves = load_json("curves.json")
+    curve = curves.get(model_name) if curves else None
     metadata = load_json("metadata.json")
-    if comparison is not None:
-        comparison = comparison.assign(model=comparison["model"].map(pretty))
-    sub_perf, sub_curves, sub_features, sub_training, sub_data = st.tabs(
-        ["📈 Performance", "🎯 ROC & PR curves", "🧠 Features", "🔁 Training", "🗂️ Dataset"])
+    sub_perf, sub_curves, sub_features, sub_data = st.tabs(
+        ["📈 Performance", "🎯 ROC & PR curves", "🧠 Features", "🗂️ Dataset"])
 
-    # --- model comparison, harder test set, confusion matrix ------------------
+    def score_tiles(scores):
+        cols = st.columns(5, gap="small")
+        cols[0].metric("Accuracy", f"{scores['accuracy']:.2%}")
+        cols[1].metric("Precision", f"{scores['precision']:.2%}")
+        cols[2].metric("Recall", f"{scores['recall']:.2%}")
+        cols[3].metric("F1 score", f"{scores['f1']:.4f}")
+        if scores.get("false_positive_rate") is not None:
+            cols[4].metric("False alarms", f"{scores['false_positive_rate']:.2%}")
+
+    def confusion_chart(cm, title):
+        names = bundle["class_names"]
+        cm = np.array(cm)
+        cells = pd.DataFrame([(names[i], names[j], int(cm[i, j]))
+                              for i in range(len(names)) for j in range(len(names))],
+                             columns=["actual", "predicted", "count"])
+        base = alt.Chart(cells).encode(x=alt.X("predicted:N", sort=names), y=alt.Y("actual:N", sort=names))
+        heat = base.mark_rect(cornerRadius=8).encode(
+            color=alt.Color("count:Q", scale=alt.Scale(type="symlog", scheme="teals"), legend=None),
+            tooltip=["actual", "predicted", "count"])
+        text = base.mark_text(fontSize=20, fontWeight="bold").encode(
+            text="count:Q",
+            color=alt.condition(alt.datum.count > cm.max() / 3, alt.value("#0f172a"), alt.value("#e2e8f0")))
+        return (heat + text).properties(height=260, title=title)
+
+    # --- scores on both test sets, confusion matrices -------------------------------
     with sub_perf:
-        if comparison is not None:
-            ui.section("Model comparison (held-out test set)")
-            long = comparison.melt(id_vars="model", value_vars=["accuracy", "precision", "recall", "f1"],
-                                   var_name="metric", value_name="score")
-            bars = alt.Chart(long).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-                x=alt.X("model:N", sort=list(comparison["model"]), title=None, axis=alt.Axis(labelAngle=0)),
-                xOffset="metric:N",
-                y=alt.Y("score:Q", scale=alt.Scale(domain=[max(0, long["score"].min() - 0.02), 1]), title=None),
-                color=alt.Color("metric:N", scale=alt.Scale(range=["#22d3ee", "#a78bfa", "#f59e0b", "#22c55e"])),
-                tooltip=["model", "metric", alt.Tooltip("score:Q", format=".4f")]).properties(height=300)
-            st.altair_chart(bars, width="stretch")
-            st.dataframe(comparison, hide_index=True, width="stretch")
-            st.caption(f"Deployed in this app: {pretty(bundle['model_name'])} (highest F1 on the held-out test set).")
+        if result is None:
+            st.info(f"No saved results for {model_label}. Run `python -m ml.classical_models`.")
+        else:
+            extra = result.get("extra_test")
+            ui.section(f"{model_label}: held-out 20% test split")
+            score_tiles(result)
+            if extra:
+                ui.section("KDDTest+: separate file that includes attack types never seen in training")
+                score_tiles(extra)
+                if extra.get("unseen_attack_detection_rate") is not None:
+                    st.metric("Attacks of unseen types that were detected",
+                              f"{extra['unseen_attack_detection_rate']:.1%}")
 
-            if "extra_test_f1" in comparison.columns:
-                ui.section("Harder test: KDDTest+ with attack types never seen in training")
-                extra = comparison.melt(id_vars="model", value_vars=["extra_test_f1", "unseen_attack_detection"],
-                                        var_name="measure", value_name="score")
-                extra["measure"] = extra["measure"].map({"extra_test_f1": "F1 on KDDTest+",
-                                                         "unseen_attack_detection": "unseen attack types detected"})
-                chart = alt.Chart(extra).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-                    x=alt.X("model:N", title=None, axis=alt.Axis(labelAngle=0)), xOffset="measure:N",
+                ui.section("The same model on the two test sets")
+                rows = [{"test set": label, "metric": k.capitalize() if k != "f1" else "F1", "score": sc[k]}
+                        for label, sc in [("Random 20% split", result), ("KDDTest+", extra)]
+                        for k in ["accuracy", "precision", "recall", "f1"]]
+                chart = alt.Chart(pd.DataFrame(rows)).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+                    x=alt.X("metric:N", title=None, axis=alt.Axis(labelAngle=0), sort=["Accuracy", "Precision", "Recall", "F1"]),
+                    xOffset="test set:N",
                     y=alt.Y("score:Q", scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(format="%"), title=None),
-                    color=alt.Color("measure:N", scale=alt.Scale(range=["#22d3ee", "#ef4444"])),
-                    tooltip=["model", "measure", alt.Tooltip("score:Q", format=".1%")]).properties(height=260)
+                    color=alt.Color("test set:N", scale=alt.Scale(range=["#22d3ee", "#f59e0b"]),
+                                    legend=alt.Legend(orient="bottom")),
+                    tooltip=["test set", "metric", alt.Tooltip("score:Q", format=".2%")]).properties(height=300)
                 st.altair_chart(chart, width="stretch")
-                st.markdown('<div class="note">Every model detects only about a third of the attacks whose '
-                            'type was not in the training data. A supervised model cannot be relied on to '
-                            'catch zero-day attacks.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="note">On the harder file precision stays high but recall falls: '
+                            'attacks that look unlike the training data are labelled normal. A supervised '
+                            'model cannot be relied on to catch zero-day attacks.</div>', unsafe_allow_html=True)
 
-        results_json = load_json(f"results/{bundle['model_name']}.json")
-        if results_json is not None:
-            ui.section(f"Confusion matrix · {pretty(bundle['model_name'])}")
-            names = bundle["class_names"]
-            cm = np.array(results_json["confusion_matrix"])
-            cells = pd.DataFrame([(names[i], names[j], int(cm[i, j]))
-                                  for i in range(len(names)) for j in range(len(names))],
-                                 columns=["actual", "predicted", "count"])
-            base = alt.Chart(cells).encode(x=alt.X("predicted:N", sort=names), y=alt.Y("actual:N", sort=names))
-            heat = base.mark_rect(cornerRadius=8).encode(
-                color=alt.Color("count:Q", scale=alt.Scale(type="symlog", scheme="teals"), legend=None),
-                tooltip=["actual", "predicted", "count"])
-            text = base.mark_text(fontSize=22, fontWeight="bold").encode(
-                text="count:Q",
-                color=alt.condition(alt.datum.count > cm.max() / 3, alt.value("#0f172a"), alt.value("#e2e8f0")))
-            c1, c2 = st.columns([1.3, 1])
-            c1.altair_chart((heat + text).properties(height=300), width="stretch")
-            c2.markdown('<div class="note"><br>Rows are the true classes, columns the predictions.<br><br>'
-                        'Off-diagonal cells are mistakes: top-right = false alarms (normal traffic flagged), '
+            ui.section("Confusion matrices")
+            c1, c2 = st.columns(2)
+            c1.altair_chart(confusion_chart(result["confusion_matrix"], "Random 20% split"), width="stretch")
+            if extra:
+                c2.altair_chart(confusion_chart(extra["confusion_matrix"], "KDDTest+"), width="stretch")
+            st.markdown('<div class="note">Rows are the true classes, columns the predictions. Off-diagonal '
+                        'cells are mistakes: top-right = false alarms (normal traffic flagged), '
                         'bottom-left = missed attacks.</div>', unsafe_allow_html=True)
 
-    # --- ROC, precision-recall, score distribution ------------------------------
+    # --- ROC, precision-recall, score distribution ------------------------------------
     with sub_curves:
-        if not curves:
+        if not curve:
             st.info("No curves found. Run `python -m ml.evaluation --curves` (binary task only).")
         else:
-            names_available = list(curves)
-            chosen = st.multiselect("Models", names_available, default=names_available, format_func=pretty)
-            zoom = st.toggle("Zoom into the top-left corner (the curves are very close to perfect)", value=True)
-            roc = pd.concat([pd.DataFrame({"model": pretty(m), "fpr": curves[m]["roc"]["fpr"],
-                                           "tpr": curves[m]["roc"]["tpr"]}) for m in chosen]) if chosen else None
-            pr = pd.concat([pd.DataFrame({"model": pretty(m), "recall": curves[m]["pr"]["recall"],
-                                          "precision": curves[m]["pr"]["precision"]}) for m in chosen]) if chosen else None
-            palette = alt.Scale(range=["#22d3ee", "#a78bfa", "#f59e0b", "#22c55e", "#f472b6"])
-            if chosen:
-                c1, c2 = st.columns(2)
-                with c1:
-                    ui.section("ROC curve")
-                    x_dom, y_dom = ([0, 0.05], [0.9, 1.0]) if zoom else ([0, 1], [0, 1])
-                    roc_chart = alt.Chart(roc).mark_line(strokeWidth=2.5, clip=True).encode(
-                        x=alt.X("fpr:Q", title="false positive rate", scale=alt.Scale(domain=x_dom)),
-                        y=alt.Y("tpr:Q", title="true positive rate (recall)", scale=alt.Scale(domain=y_dom)),
-                        color=alt.Color("model:N", scale=palette, legend=alt.Legend(orient="bottom", columns=3)),
-                        tooltip=["model", alt.Tooltip("fpr:Q", format=".4f"), alt.Tooltip("tpr:Q", format=".4f")])
-                    diagonal = alt.Chart(pd.DataFrame({"fpr": [0, 1], "tpr": [0, 1]})).mark_line(  # random guess
-                        strokeDash=[4, 4], color="#475569", clip=True).encode(
-                        x=alt.X("fpr:Q", scale=alt.Scale(domain=x_dom)), y=alt.Y("tpr:Q", scale=alt.Scale(domain=y_dom)))
-                    st.altair_chart((diagonal + roc_chart).properties(height=340).interactive(), width="stretch")
-                with c2:
-                    ui.section("Precision-recall curve")
-                    dom = [0.9, 1.0] if zoom else [0, 1]
-                    pr_chart = alt.Chart(pr).mark_line(strokeWidth=2.5, clip=True).encode(
-                        x=alt.X("recall:Q", scale=alt.Scale(domain=dom)),
-                        y=alt.Y("precision:Q", scale=alt.Scale(domain=dom)),
-                        color=alt.Color("model:N", scale=palette, legend=alt.Legend(orient="bottom", columns=3)),
-                        tooltip=["model", alt.Tooltip("recall:Q", format=".4f"), alt.Tooltip("precision:Q", format=".4f")])
-                    st.altair_chart(pr_chart.properties(height=340).interactive(), width="stretch")
+            m1, m2, _ = st.columns([1, 1, 2])
+            m1.metric("ROC AUC", f"{curve['roc_auc']:.4f}")
+            m2.metric("Average precision", f"{curve['average_precision']:.4f}")
+            zoom = st.toggle("Zoom into the top-left corner", value=True)
+            roc = pd.DataFrame({"fpr": curve["roc"]["fpr"], "tpr": curve["roc"]["tpr"]})
+            pr = pd.DataFrame({"recall": curve["pr"]["recall"], "precision": curve["pr"]["precision"]})
+            c1, c2 = st.columns(2)
+            with c1:
+                ui.section("ROC curve")
+                x_dom, y_dom = ([0, 0.1], [0.8, 1.0]) if zoom else ([0, 1], [0, 1])
+                line = alt.Chart(roc).mark_line(strokeWidth=2.5, color=ui.CYAN, clip=True).encode(
+                    x=alt.X("fpr:Q", title="false positive rate", scale=alt.Scale(domain=x_dom)),
+                    y=alt.Y("tpr:Q", title="true positive rate (recall)", scale=alt.Scale(domain=y_dom)),
+                    tooltip=[alt.Tooltip("fpr:Q", format=".4f"), alt.Tooltip("tpr:Q", format=".4f")])
+                guess = alt.Chart(pd.DataFrame({"fpr": [0, 1], "tpr": [0, 1]})).mark_line(
+                    strokeDash=[4, 4], color="#475569", clip=True).encode(
+                    x=alt.X("fpr:Q", scale=alt.Scale(domain=x_dom)), y=alt.Y("tpr:Q", scale=alt.Scale(domain=y_dom)))
+                layers = [guess, line]
+                if result and result.get("false_positive_rate") is not None:  # the 0.5 threshold used by the app
+                    point = pd.DataFrame({"fpr": [result["false_positive_rate"]], "tpr": [result["recall"]]})
+                    layers.append(alt.Chart(point).mark_point(size=120, filled=True, color=ui.RED, clip=True).encode(
+                        x="fpr:Q", y="tpr:Q", tooltip=[alt.Tooltip("fpr:Q", format=".4f"), alt.Tooltip("tpr:Q", format=".4f")]))
+                st.altair_chart(alt.layer(*layers).properties(height=340).interactive(), width="stretch")
+                st.caption("Red dot: the 50% decision threshold the app uses. Dashed line: random guessing.")
+            with c2:
+                ui.section("Precision-recall curve")
+                dom = [0.8, 1.0] if zoom else [0, 1]
+                line = alt.Chart(pr).mark_line(strokeWidth=2.5, color=ui.CYAN, clip=True).encode(
+                    x=alt.X("recall:Q", scale=alt.Scale(domain=dom)), y=alt.Y("precision:Q", scale=alt.Scale(domain=dom)),
+                    tooltip=[alt.Tooltip("recall:Q", format=".4f"), alt.Tooltip("precision:Q", format=".4f")])
+                layers = [line]
+                if result:
+                    point = pd.DataFrame({"recall": [result["recall"]], "precision": [result["precision"]]})
+                    layers.append(alt.Chart(point).mark_point(size=120, filled=True, color=ui.RED, clip=True).encode(
+                        x="recall:Q", y="precision:Q",
+                        tooltip=[alt.Tooltip("recall:Q", format=".4f"), alt.Tooltip("precision:Q", format=".4f")]))
+                st.altair_chart(alt.layer(*layers).properties(height=340).interactive(), width="stretch")
+                st.caption("Scroll to zoom and drag to pan the charts.")
 
-                auc_table = pd.DataFrame([{"model": pretty(m), "ROC AUC": curves[m]["roc_auc"],
-                                           "average precision": curves[m]["average_precision"]} for m in chosen])
-                st.dataframe(auc_table.sort_values("ROC AUC", ascending=False), hide_index=True, width="stretch",
-                             column_config={c: st.column_config.NumberColumn(format="%.6f")
-                                            for c in ["ROC AUC", "average precision"]})
-                st.caption("Scroll to zoom and drag to pan the charts. "
-                           "The SVM curve uses its decision score because it was trained without probability estimates.")
-
-            with_hist = [m for m in curves if "histogram" in curves[m]]
-            if with_hist:
+            if "histogram" in curve:
                 ui.section("Score distribution: how well does the model separate the classes?")
                 c1, c2 = st.columns([1, 3])
-                model_h = c1.selectbox("Model", with_hist, format_func=pretty,
-                                       index=with_hist.index(bundle["model_name"]) if bundle["model_name"] in with_hist else 0)
                 log_scale = c1.toggle("Log scale", value=True)
                 c1.markdown('<div class="note">Attack probability given to every test connection, split by its '
                             'true class. Good separation = normal traffic piled up on the left, attacks on the right.</div>',
                             unsafe_allow_html=True)
-                h = curves[model_h]["histogram"]
+                h = curve["histogram"]
                 hist = pd.concat([pd.DataFrame({"bin": h["bin_start"], "count": counts, "true class": cls})
                                   for cls, counts in h["counts"].items()])
                 if log_scale:  # a log axis cannot show 0, so empty bins are left out
@@ -575,7 +584,7 @@ with tab_insights:
     with sub_features:
         importance = load_csv("feature_importance.csv")
         if importance is not None:
-            ui.section("Random Forest feature importance (Phase 1 feature selection)")
+            ui.section("Feature ranking used to pick the 20 inputs (Phase 1)")
             n_show = st.slider("Features to show", 10, len(importance), min(len(features) + 5, len(importance)))
             top = importance.head(n_show).copy()
             top["selected"] = np.where(top["feature"].isin(features), "selected", "not selected")
@@ -599,40 +608,8 @@ with tab_insights:
             st.altair_chart((cum + cut).properties(height=260), width="stretch")
             kept = cumulative.loc[len(features) - 1, "cumulative"]
             st.caption(f"The {len(features)} selected features (orange line) carry {kept:.1%} of the "
-                       f"Random Forest's total importance.")
-
-    # --- training curves -----------------------------------------------------------
-    with sub_training:
-        nn_results = load_json("results/neural_network.json")
-        if nn_results and "history" in nn_results:
-            ui.section("Neural network training (PyTorch)")
-            hist = nn_results["history"]
-            epochs = np.arange(1, len(hist["train_loss"]) + 1)
-            loss = pd.concat([pd.DataFrame({"epoch": epochs, "loss": hist["train_loss"], "set": "training"}),
-                              pd.DataFrame({"epoch": epochs, "loss": hist["val_loss"], "set": "validation"})])
-            best = int(np.argmin(hist["val_loss"])) + 1
-            c1, c2 = st.columns(2)
-            loss_chart = alt.Chart(loss).mark_line(point=alt.OverlayMarkDef(size=25), strokeWidth=2).encode(
-                x="epoch:Q", y=alt.Y("loss:Q", title="cross-entropy loss"),
-                color=alt.Color("set:N", scale=alt.Scale(range=["#22d3ee", "#f59e0b"]), legend=alt.Legend(orient="bottom", columns=3)),
-                tooltip=["epoch", "set", alt.Tooltip("loss:Q", format=".4f")])
-            best_rule = alt.Chart(pd.DataFrame({"epoch": [best]})).mark_rule(color=ui.GREEN, strokeDash=[4, 3]).encode(
-                x="epoch:Q")
-            c1.altair_chart((loss_chart + best_rule).properties(height=300, title="Loss per epoch"), width="stretch")
-            acc = pd.DataFrame({"epoch": epochs, "accuracy": hist["val_accuracy"]})
-            acc_chart = alt.Chart(acc).mark_line(point=alt.OverlayMarkDef(size=25), color=ui.GREEN, strokeWidth=2).encode(
-                x="epoch:Q", y=alt.Y("accuracy:Q", scale=alt.Scale(zero=False), axis=alt.Axis(format=".1%")),
-                tooltip=["epoch", alt.Tooltip("accuracy:Q", format=".2%")])
-            c2.altair_chart(acc_chart.properties(height=300, title="Validation accuracy"), width="stretch")
-            st.caption(f"Early stopping kept the weights from epoch {best} (green line), where the validation "
-                       f"loss was lowest; training stopped {len(epochs) - best} epochs later.")
-        if comparison is not None and "train_seconds" in comparison.columns:
-            ui.section("Training time per model")
-            times = alt.Chart(comparison).mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color="#a78bfa").encode(
-                x=alt.X("train_seconds:Q", title="seconds"), y=alt.Y("model:N", sort="-x", title=None),
-                tooltip=["model", "train_seconds"]).properties(height=200)
-            st.altair_chart(times, width="stretch")
-            st.caption("Measured on the development laptop; the SVM is trained on a 20,000-row subsample.")
+                       f"total importance. The ranking was computed once during feature selection with a "
+                       f"Random Forest helper; it is not the deployed model.")
 
     # --- dataset ----------------------------------------------------------------------
     with sub_data:
